@@ -1,0 +1,18 @@
+# Build output
+*.exe
+*.pdb
+bin/
+obj/
+
+# Local data (never commit settings: they may contain API keys)
+settings.json
+*.log
+log.txt
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.claude/
