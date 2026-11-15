@@ -31,6 +31,19 @@ namespace ChatTranslator
                 using (var f = new SettingsForm(s, null, Theme.MakeIcon(Theme.Accent), SettingsForm.TabEngine))
                     Render(f, Path.Combine(dir, p + "engine-" + engine + ".png"));
             }
+            var cs = new Settings { ChatX = 20, ChatY = 820, ChatW = 520, ChatH = 160 };
+            using (var f = new SettingsForm(cs, null, Theme.MakeIcon(Theme.Accent), SettingsForm.TabChat))
+                Render(f, Path.Combine(dir, p + "chat.png"));
+            using (var ov = new ChatOverlay())
+            {
+                ov.Begin(new Rectangle(0, 0, 520, 160), true, Settings.DefChat);
+                ov.Add(new System.Collections.Generic.List<ChatEntry> {
+                    new ChatEntry { Original = "[All] Enemy: ez mid, ur so bad", Translated = lang == "ru" ? "[Все] Enemy: изи мид, ты такой слабый" : "[All] Enemy: ez mid, ur so bad", Time = DateTime.Now },
+                    new ChatEntry { Original = "[Team] xX_Sniper: need heal pls", Translated = lang == "ru" ? "[Команда] xX_Sniper: нужен хил, пожалуйста" : "[Team] xX_Sniper: need heal pls", Time = DateTime.Now },
+                    new ChatEntry { Original = "[All] Player1: wp guys, push top now", Translated = lang == "ru" ? "[Все] Player1: хорошо сыграли, пушим верх" : "[All] Player1: well played, push top now", Time = DateTime.Now },
+                });
+                Render(ov, Path.Combine(dir, p + "overlay.png"));
+            }
             using (var f = new SettingsForm(new Settings(), null, Theme.MakeIcon(Theme.Accent), SettingsForm.TabKeys))
                 Render(f, Path.Combine(dir, p + "keys.png"));
             using (var f = new SettingsForm(new Settings(), null, Theme.MakeIcon(Theme.Accent), SettingsForm.TabGeneral))

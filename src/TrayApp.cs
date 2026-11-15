@@ -11,7 +11,7 @@ namespace ChatTranslator
 {
     class TrayApp : ApplicationContext
     {
-        const int HK_POPUP = 1, HK_INLINE = 2, HK_REVERSE = 3, HK_TOGGLE = 4;
+        const int HK_POPUP = 1, HK_INLINE = 2, HK_REVERSE = 3, HK_TOGGLE = 4, HK_CHAT = 5, HK_CHAT_REGION = 6;
 
         readonly Settings S;
         readonly NotifyIcon tray;
@@ -19,6 +19,9 @@ namespace ChatTranslator
         readonly InputPopup popup;
         readonly Toast toast;
         readonly Icon icoOn, icoOff;
+        readonly ChatReader reader;
+        readonly ChatOverlay overlay;
+        bool picking;
         SettingsForm settingsForm;
         IntPtr target;
         bool popupSafe;
@@ -43,6 +46,11 @@ namespace ChatTranslator
             popup.EngineToggleRequested += CycleEngine;
 
             toast = new Toast();
+
+            overlay = new ChatOverlay();
+            reader = new ChatReader(S);
+            reader.Translated += list => overlay.Add(list);
+            reader.Status += (text, error) => { if (reader.Running) overlay.SetStatus(text, error); };
 
             tray = new NotifyIcon { Visible = true, ContextMenuStrip = new ContextMenuStrip() };
             tray.ContextMenuStrip.Opening += (s, e) => { BuildMenu(); e.Cancel = false; };
@@ -72,6 +80,8 @@ namespace ChatTranslator
                 TryReg(HK_POPUP, S.HkPopup, failed);
                 TryReg(HK_INLINE, S.HkInline, failed);
                 TryReg(HK_REVERSE, S.HkReverse, failed);
+                TryReg(HK_CHAT, S.HkChat, failed);
+                TryReg(HK_CHAT_REGION, S.HkChatRegion, failed);
             }
             TryReg(HK_TOGGLE, S.HkToggle, failed);
             if (failed.Count > 0)
@@ -90,6 +100,8 @@ namespace ChatTranslator
         {
             if (id == HK_TOGGLE) { SetEnabled(!S.Enabled); return; }
             if (!S.Enabled) return;
+            if (id == HK_CHAT) { ToggleChat(); return; }
+            if (id == HK_CHAT_REGION) { PickChatRegion(true); return; }
 
             IntPtr fg = Native.GetForegroundWindow();
             if (popup.Visible && fg == popup.Handle) { if (id == HK_POPUP) popup.Cancel(); return; }
@@ -354,6 +366,63 @@ namespace ChatTranslator
             return Task.Run(() => Translator.Translate(snapshot, text, lang, snapshot.Engine));
         }
 
+        // ── чтение чата (OCR) ──
+        void ToggleChat()
+        {
+            if (reader.Running) StopChat(true);
+            else if (!S.HasChatRegion()) PickChatRegion(true);
+            else StartChat();
+        }
+
+        void StartChat()
+        {
+            if (!S.Enabled || !S.HasChatRegion()) return;
+            overlay.Begin(S.ChatRegion(), S.ChatShowOriginal, S.HkChat);
+            reader.Start();
+            UpdateTray();
+        }
+
+        void StopChat(bool announce)
+        {
+            if (!reader.Running) return;
+            reader.Stop();
+            overlay.End();
+            UpdateTray();
+            if (announce) toast.ShowMessage(L.T("Чтение чата выключено", "Chat reading is off"), Toast.Info, 2000, IntPtr.Zero);
+        }
+
+        // Выбрать область чата; startAfter — сразу включить чтение.
+        public Rectangle? PickChatRegion(bool startAfter)
+        {
+            if (picking) return null;
+            picking = true;
+            bool wasRunning = reader.Running;
+            reader.Stop();
+            overlay.Hide();
+            toast.Hide();
+            Rectangle? result = null;
+            try
+            {
+                using (var picker = new RegionPicker(S.HasChatRegion() ? S.ChatRegion() : Rectangle.Empty))
+                {
+                    if (picker.ShowDialog() == DialogResult.OK)
+                    {
+                        var r = picker.Result;
+                        S.ChatX = r.X; S.ChatY = r.Y; S.ChatW = r.Width; S.ChatH = r.Height;
+                        S.Save();
+                        result = r;
+                    }
+                }
+            }
+            catch (Exception ex) { Log.Write("region: " + ex.Message); }
+            finally { picking = false; }
+
+            if (target != IntPtr.Zero && Native.IsWindow(target) && settingsForm == null) Native.SetForegroundWindow(target);
+            if ((result.HasValue && startAfter) || wasRunning) StartChat();
+            else UpdateTray();
+            return result;
+        }
+
         // ── трей ──
         void SetEnabled(bool on)
         {
@@ -361,6 +430,7 @@ namespace ChatTranslator
             SaveSettings();
             RegisterAll();
             if (!on && popup.Visible) popup.Cancel();
+            if (!on) StopChat(false);
             toast.ShowMessage(on ? L.T("Переводчик включён", "Translator is on")
                                  : L.T("Переводчик выключен — горячие клавиши свободны", "Translator is off — hotkeys are released"),
                 on ? Toast.Ok : Toast.Info, 2000, IntPtr.Zero);
@@ -402,7 +472,8 @@ namespace ChatTranslator
         {
             tray.Icon = S.Enabled ? icoOn : icoOff;
             string t = AppInfo.Name + ": " + (S.Enabled ? L.T("вкл", "on") : L.T("выкл", "off")) + " · "
-                + Help.Title(S.Preset).ToLowerInvariant() + " · " + EngineName();
+                + Help.Title(S.Preset).ToLowerInvariant() + " · " + EngineName()
+                + (reader != null && reader.Running ? L.T(" · чат", " · chat") : "");
             tray.Text = t.Length > 63 ? t.Substring(0, 63) : t;
         }
 
@@ -457,6 +528,14 @@ namespace ChatTranslator
             m.Items.Add(tl);
             m.Items.Add(new ToolStripSeparator());
 
+            AddItem(m.Items, L.T("Читать чат игры (перевод входящих)", "Read game chat (translate incoming)"), reader.Running, S.HkChat, () =>
+            {
+                if (!S.Enabled) SetEnabled(true);
+                ToggleChat();
+            });
+            AddItem(m.Items, L.T("Выбрать область чата…", "Select chat area…"), false, S.HkChatRegion, () => PickChatRegion(false));
+            m.Items.Add(new ToolStripSeparator());
+
             AddItem(m.Items, L.T("Открыть окно ввода", "Open input box"), false, S.HkPopup, () =>
             {
                 if (!S.Enabled) return;
@@ -488,12 +567,23 @@ namespace ChatTranslator
             }
             hk.UnregisterAll(); // чтобы можно было записать сочетания в поля
             settingsForm = new SettingsForm(S, lastExe, icoOn, tab);
+            settingsForm.PickRegion = () =>
+            {
+                var f = settingsForm;
+                f.Hide();
+                var r = PickChatRegion(false);
+                f.Show();
+                f.Activate();
+                return r;
+            };
             settingsForm.FormClosed += (s, e) =>
             {
                 bool restart = settingsForm.RestartRequested;
                 settingsForm = null;
                 if (restart) { Restart(); return; }
                 RegisterAll();
+                reader.ApplySettings();
+                if (reader.Running) { reader.Stop(); StartChat(); }
                 UpdateTray();
             };
             settingsForm.Show();
@@ -509,6 +599,8 @@ namespace ChatTranslator
 
         void ExitApp()
         {
+            reader.Stop();
+            overlay.Hide();
             hk.Dispose();
             tray.Visible = false;
             tray.Dispose();
