@@ -112,7 +112,21 @@ namespace ChatTranslator
         public bool SwitchLayout { get; set; }
         public bool Enabled { get; set; }
 
-        public const string DefPopup = "Ctrl+Shift+Space", DefInline = "Ctrl+Shift+Enter", DefReverse = "Ctrl+Alt+R";
+        // Чтение чата (OCR)
+        public string HkChat { get; set; }        // вкл/выкл чтение чата
+        public string HkChatRegion { get; set; }  // выбрать область чата
+        public int ChatX { get; set; }
+        public int ChatY { get; set; }
+        public int ChatW { get; set; }
+        public int ChatH { get; set; }
+        public string ChatOcrLang { get; set; }   // "" = как язык собеседников
+        public int ChatInterval { get; set; }     // секунды
+        public bool ChatShowOriginal { get; set; }
+
+        public System.Drawing.Rectangle ChatRegion() { return new System.Drawing.Rectangle(ChatX, ChatY, ChatW, ChatH); }
+        public bool HasChatRegion() { return ChatW >= 20 && ChatH >= 10; }
+
+        public const string DefPopup = "Ctrl+Shift+Space", DefInline = "Ctrl+Shift+Enter", DefReverse = "Ctrl+Alt+R", DefChat = "Ctrl+Alt+T";
 
         public Settings()
         {
@@ -143,6 +157,11 @@ namespace ChatTranslator
             Sound = true;
             SwitchLayout = true;
             Enabled = true;
+            HkChat = DefChat;
+            HkChatRegion = "";
+            ChatOcrLang = "";
+            ChatInterval = 2;
+            ChatShowOriginal = false;
         }
 
         public static readonly string Dir = Path.Combine(
@@ -202,6 +221,10 @@ namespace ChatTranslator
             if (HkInline == null) HkInline = d.HkInline;
             if (HkReverse == null) HkReverse = d.HkReverse;
             if (HkToggle == null) HkToggle = "";
+            if (HkChat == null) HkChat = d.HkChat;
+            if (HkChatRegion == null) HkChatRegion = "";
+            if (ChatOcrLang == null) ChatOcrLang = "";
+            if (ChatInterval < 1 || ChatInterval > 30) ChatInterval = d.ChatInterval;
         }
 
         public string GetDeepLKey() { return Unprotect(DeepLKey); }

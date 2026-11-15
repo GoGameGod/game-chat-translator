@@ -10,7 +10,10 @@ namespace ChatTranslator
 {
     class SettingsForm : Form, INoActivate
     {
-        public const int TabMode = 0, TabEngine = 1, TabKeys = 2, TabGeneral = 3;
+        public const int TabMode = 0, TabEngine = 1, TabChat = 2, TabKeys = 3, TabGeneral = 4;
+
+        // Выбор области чата делает TrayApp (окно настроек на это время прячется).
+        public Func<Rectangle?> PickRegion;
 
         public bool NoActivate { get; set; }
         protected override bool ShowWithoutActivation { get { return NoActivate; } }
@@ -46,8 +49,16 @@ namespace ChatTranslator
         Label lblTest;
         Button btnTest;
 
+        // «Чтение чата»
+        GuideView chatGuide;
+        Label lblRegion;
+        ComboBox cbOcrLang, cbInterval;
+        CheckBox chShowOriginal;
+        List<string> ocrTags = new List<string>();
+        static readonly int[] Intervals = { 1, 2, 3, 5, 10 };
+
         // «Горячие клавиши»
-        HotkeyBox hkPopup, hkInline, hkReverse, hkToggle;
+        HotkeyBox hkPopup, hkInline, hkReverse, hkToggle, hkChat, hkChatRegion;
 
         // «Общее»
         ComboBox cbUiLang;
@@ -82,6 +93,7 @@ namespace ChatTranslator
             tabs = new TabControl { Location = new Point(10, 10), Size = new Size(620, 600) };
             tabs.TabPages.Add(BuildMode());
             tabs.TabPages.Add(BuildEngine());
+            tabs.TabPages.Add(BuildChat());
             tabs.TabPages.Add(BuildKeys());
             tabs.TabPages.Add(BuildGeneral());
             Controls.Add(tabs);
@@ -95,6 +107,8 @@ namespace ChatTranslator
             chSound.CheckedChanged += refresh;
             rbDefFast.CheckedChanged += refresh;
             cbMy.SelectedIndexChanged += refresh;
+            hkChat.TextChanged += refresh;
+            cbTarget.SelectedIndexChanged += (o, e) => RefreshOcrAuto();
 
             var btnSave = new Button { Text = L.T("Сохранить", "Save"), Location = new Point(430, 620), Size = new Size(95, 30) };
             var btnCancel = new Button { Text = L.T("Отмена", "Cancel"), Location = new Point(535, 620), Size = new Size(95, 30) };
@@ -201,13 +215,20 @@ namespace ChatTranslator
             if (token == "popup") v = hkPopup.Text;
             else if (token == "inline") v = hkInline.Text;
             else if (token == "reverse") v = hkReverse.Text;
+            else if (token == "chat") v = hkChat.Text;
+            else if (token == "chatregion") v = hkChatRegion.Text;
+            else if (token == "pick") return L.T("выбрать область", "select the area");
+            else if (token == "engine") return L.T("вкладка «Переводчик»", "Translator tab");
             else return token;
             return string.IsNullOrWhiteSpace(v) ? L.T("[клавиша не задана]", "[hotkey not set]") : v;
         }
 
         void OnGuideLink(string token)
         {
-            HotkeyBox box = token == "popup" ? hkPopup : token == "inline" ? hkInline : token == "reverse" ? hkReverse : null;
+            if (token == "pick") { DoPickRegion(); return; }
+            if (token == "engine") { tabs.SelectedIndex = TabEngine; return; }
+            HotkeyBox box = token == "popup" ? hkPopup : token == "inline" ? hkInline : token == "reverse" ? hkReverse
+                          : token == "chat" ? hkChat : token == "chatregion" ? hkChatRegion : null;
             if (box == null) return;
             tabs.SelectedIndex = TabKeys;
             box.Focus();
@@ -239,6 +260,65 @@ namespace ChatTranslator
             if (guide == null || hkPopup == null || cbMy == null) return;
             string my = Lang.All[Math.Max(0, cbMy.SelectedIndex)][0];
             guide.Render(Help.For(preset, chAutoSend.Checked, rbDefFast.Checked ? "fast" : "safe", chSound.Checked, my));
+            if (chatGuide != null && hkChat != null) chatGuide.Render(Help.Chat());
+        }
+
+        // ───────────── Вкладка «Чтение чата» ─────────────
+        TabPage BuildChat()
+        {
+            var p = new TabPage(L.T("Чтение чата", "Chat reading")) { UseVisualStyleBackColor = true };
+            var flow = Ui.Flow();
+            p.Controls.Add(flow);
+
+            flow.Controls.Add(Ui.Section(L.T("Как пользоваться", "How to use")));
+            chatGuide = new GuideView(Ui.W);
+            chatGuide.Resolve = ResolveToken;
+            chatGuide.LinkClicked += OnGuideLink;
+            flow.Controls.Add(chatGuide);
+
+            flow.Controls.Add(Ui.Section(L.T("Область чата", "Chat area")));
+            lblRegion = new Label { AutoSize = true, Margin = new Padding(6, 8, 10, 3) };
+            var btnPick = new Button { Text = L.T("Выбрать область…", "Select area…"), AutoSize = true, Margin = new Padding(0, 2, 3, 3) };
+            btnPick.Click += (o, e) => DoPickRegion();
+            flow.Controls.Add(Ui.Line(lblRegion, btnPick));
+            UpdateRegionLabel(S.HasChatRegion() ? (Rectangle?)S.ChatRegion() : null);
+
+            flow.Controls.Add(Ui.Section(L.T("Распознавание", "Recognition")));
+            cbOcrLang = new ComboBox { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
+            cbOcrLang.Items.Add("");
+            ocrTags.Add("");
+            foreach (var l in Ocr.Languages()) { cbOcrLang.Items.Add(l[1] + " (" + l[0] + ")"); ocrTags.Add(l[0]); }
+            flow.Controls.Add(Ui.Row(L.T("Язык чата (для распознавания):", "Chat language (for OCR):"), cbOcrLang, 250));
+            flow.Controls.Add(Ui.Note(L.T("Нет нужного языка? Параметры Windows → Время и язык → Язык и регион → добавь язык (с компонентом «Оптическое распознавание символов»).",
+                                          "Missing a language? Windows Settings → Time & language → Language & region → add the language (with the \"Optical character recognition\" feature).")));
+            cbInterval = new ComboBox { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
+            foreach (var i in Intervals) cbInterval.Items.Add(i + L.T(" сек", " sec"));
+            flow.Controls.Add(Ui.Row(L.T("Проверять чат каждые:", "Check the chat every:"), cbInterval, 250));
+            chShowOriginal = Ui.Check(L.T("Показывать оригинал над переводом", "Show the original above the translation"));
+            flow.Controls.Add(chShowOriginal);
+            return p;
+        }
+
+        void RefreshOcrAuto()
+        {
+            if (cbOcrLang == null || cbTarget == null || cbOcrLang.Items.Count == 0) return;
+            string target = Lang.All[Math.Max(0, cbTarget.SelectedIndex)][0];
+            cbOcrLang.Items[0] = L.T("Авто — как язык собеседников: ", "Auto — same as other players: ") + Ocr.EngineLanguage("", target);
+        }
+
+        void UpdateRegionLabel(Rectangle? r)
+        {
+            lblRegion.Text = r.HasValue
+                ? L.T("Выбрана: ", "Selected: ") + r.Value.Width + " × " + r.Value.Height + L.T(", точка ", " at ") + "(" + r.Value.X + ", " + r.Value.Y + ")"
+                : L.T("Область ещё не выбрана", "No area selected yet");
+            lblRegion.ForeColor = r.HasValue ? SystemColors.ControlText : Theme.Warn;
+        }
+
+        void DoPickRegion()
+        {
+            if (PickRegion == null) return;
+            var r = PickRegion();
+            if (r.HasValue) UpdateRegionLabel(r);
         }
 
         // ───────────── Вкладка «Переводчик» ─────────────
@@ -412,6 +492,12 @@ namespace ChatTranslator
             hkReverse = KeyRow(flow, L.T("Перевести чужое сообщение", "Translate incoming message"),
                 L.T("Скопируй чужое сообщение (Ctrl+C) и нажми — перевод появится на экране. В быстром режиме выделенный текст копируется сам.",
                     "Copy someone's message (Ctrl+C) and press it — the translation appears on screen. In fast mode the selected text is copied for you."));
+            hkChat = KeyRow(flow, L.T("Читать чат: вкл / выкл", "Read chat: on / off"),
+                L.T("Перевод входящих сообщений с экрана. В первый раз попросит выделить область чата.",
+                    "Translates incoming messages from the screen. The first time it asks you to select the chat area."));
+            hkChatRegion = KeyRow(flow, L.T("Выбрать область чата", "Select chat area"),
+                L.T("Необязательно — область можно выбрать и в меню значка в трее или на вкладке «Чтение чата».",
+                    "Optional — you can also select it from the tray menu or the Chat reading tab."));
             hkToggle = KeyRow(flow, L.T("Включить / выключить", "Turn on / off"),
                 L.T("Работает, даже когда переводчик выключен. Можно не задавать — вкл/выкл есть по клику на значок в трее.",
                     "Works even when the translator is off. Optional — clicking the tray icon toggles it too."));
@@ -422,6 +508,8 @@ namespace ChatTranslator
                 hkPopup.Text = Settings.DefPopup;
                 hkInline.Text = Settings.DefInline;
                 hkReverse.Text = Settings.DefReverse;
+                hkChat.Text = Settings.DefChat;
+                hkChatRegion.Text = "";
                 hkToggle.Text = "";
             };
             flow.Controls.Add(btnDef);
@@ -560,6 +648,15 @@ namespace ChatTranslator
             hkInline.Text = s.HkInline;
             hkReverse.Text = s.HkReverse;
             hkToggle.Text = s.HkToggle;
+            hkChat.Text = s.HkChat;
+            hkChatRegion.Text = s.HkChatRegion;
+
+            int oi = ocrTags.IndexOf(s.ChatOcrLang ?? "");
+            cbOcrLang.SelectedIndex = oi < 0 ? 0 : oi;
+            int ii = Array.IndexOf(Intervals, s.ChatInterval);
+            cbInterval.SelectedIndex = ii < 0 ? 1 : ii;
+            chShowOriginal.Checked = s.ChatShowOriginal;
+            RefreshOcrAuto();
 
             cbUiLang.SelectedIndex = s.UiLang == "ru" ? 1 : s.UiLang == "en" ? 2 : 0;
             chLayout.Checked = s.SwitchLayout;
@@ -596,6 +693,12 @@ namespace ChatTranslator
             s.HkInline = hkInline.Text;
             s.HkReverse = hkReverse.Text;
             s.HkToggle = hkToggle.Text;
+            s.HkChat = hkChat.Text;
+            s.HkChatRegion = hkChatRegion.Text;
+
+            s.ChatOcrLang = cbOcrLang.SelectedIndex > 0 ? ocrTags[cbOcrLang.SelectedIndex] : "";
+            s.ChatInterval = Intervals[Math.Max(0, cbInterval.SelectedIndex)];
+            s.ChatShowOriginal = chShowOriginal.Checked;
 
             s.UiLang = cbUiLang.SelectedIndex == 1 ? "ru" : cbUiLang.SelectedIndex == 2 ? "en" : "auto";
             s.SwitchLayout = chLayout.Checked;
@@ -605,7 +708,7 @@ namespace ChatTranslator
         {
             // Одинаковые сочетания на разных действиях.
             var seen = new Dictionary<string, HotkeyBox>(StringComparer.OrdinalIgnoreCase);
-            foreach (var hb in new[] { hkPopup, hkInline, hkReverse, hkToggle })
+            foreach (var hb in new[] { hkPopup, hkInline, hkReverse, hkChat, hkChatRegion, hkToggle })
             {
                 string v = hb.Text.Trim();
                 if (v.Length == 0) continue;

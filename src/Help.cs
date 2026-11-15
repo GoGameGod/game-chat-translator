@@ -29,6 +29,34 @@ namespace ChatTranslator
             return L.T("Режим «Безопасный»: перевод в буфер, вставляешь сам Ctrl+V", "\"Safe\" mode: the translation goes to the clipboard, paste it with Ctrl+V");
         }
 
+        // Инструкция к чтению чата. Токены: {chat}, {chatregion} — клавиши, {pick} — выбрать область, {engine} — вкладка «Переводчик».
+        public static List<HelpBlock> Chat()
+        {
+            var b = new List<HelpBlock>();
+            Action<char, string, string> A = (k, ru, en) => b.Add(new HelpBlock(k, L.T(ru, en)));
+            A('P', "Программа сама читает чат игры с экрана и показывает перевод новых сообщений рядом с ним.",
+                   "The app reads the game chat from the screen and shows translations of new messages next to it.");
+            A('H', "Как включить", "How to turn it on");
+            A('S', "Переключи игру в режим «оконный без рамки» (borderless): в эксклюзивном полноэкранном режиме Windows не может снять картинку игры.",
+                   "Switch the game to borderless windowed: Windows can't capture a game in exclusive fullscreen.");
+            A('S', "В игре нажми {chat}. В первый раз экран затемнится — выдели мышкой область, где идут сообщения чата. Можно и заранее: {pick}.",
+                   "In the game press {chat}. The first time, the screen dims — drag over the area where chat messages appear. Or do it now: {pick}.");
+            A('S', "Над чатом появится панель с переводом новых сообщений. Выключить — снова {chat}.",
+                   "A panel with translations of new messages appears above the chat. Press {chat} again to turn it off.");
+            A('H', "Советы", "Tips");
+            A('B', "Выделяй только сами сообщения — без поля ввода, кнопок и мини-карты: так меньше мусора.",
+                   "Select only the messages — no input field, buttons or minimap: less noise.");
+            A('B', "Сообщения уже на твоём языке не переводятся, каждая строка переводится один раз.",
+                   "Messages already in your language are skipped; each line is translated once.");
+            A('B', "Если текст распознаётся с ошибками — выбери ниже язык чата (язык, на котором пишут собеседники).",
+                   "If text is misread, pick the chat language below (the language other players write in).");
+            A('B', "Переводит тот же сервис, что и твои сообщения ({engine}).",
+                   "Translation uses the same service as your messages ({engine}).");
+            A('G', "Безопасно: программа только снимает картинку выбранной области экрана (как OBS или Discord при трансляции) и распознаёт текст средствами Windows прямо на компьютере. В игру она не лезет и клавиши не нажимает.",
+                   "Safe: the app only takes a picture of the selected screen area (like OBS or Discord screen sharing) and reads the text with Windows' built-in OCR, locally. It never touches the game and never presses keys.");
+            return b;
+        }
+
         static string Mine(string myLang)
         {
             if (L.Ru) return myLang == "ru" ? "по-русски" : "на своём языке";
